@@ -1,0 +1,4 @@
+include LICENSE NOTICE README.md PACKAGING.md
+recursive-include data *
+recursive-include fingerprint_manager/qml *.qml
+recursive-include tests *.py

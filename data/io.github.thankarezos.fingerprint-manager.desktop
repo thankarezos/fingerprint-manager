@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Fingerprint Manager
+Comment=Enroll and verify fingerprints with fprintd
+Exec=fingerprint-manager
+Icon=fingerprint-manager
+Terminal=false
+Categories=Settings;Security;
+Keywords=fingerprint;biometrics;fprintd;
+StartupNotify=true

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fingerprint-manager"
+version = "0.1.0"
+description = "Qt 6 and Kirigami fingerprint manager for fprintd"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.6"]
+license = "MIT"
+
+[project.scripts]
+fingerprint-manager = "fingerprint_manager.app:main"
+
+[tool.setuptools.packages.find]
+include = ["fingerprint_manager*"]
+
+[tool.setuptools.package-data]
+fingerprint_manager = ["qml/*.qml"]
+
+[tool.setuptools.data-files]
+"share/applications" = ["data/io.github.thankarezos.fingerprint-manager.desktop"]
+"share/icons/hicolor/scalable/apps" = ["data/fingerprint-manager.svg"]
+
+# The privileged helper is deliberately NOT installed by pip. Distribution
+# packaging must install it and its policy into root-owned system paths.

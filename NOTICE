@@ -1,0 +1,16 @@
+Fingerprint Manager is a new Python / Qt 6 / Kirigami implementation.
+
+Design and feature reference:
+  CS9711 Manager by Mahmud Farooque
+  https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux
+  Reviewed at commit 14e6df0fe6bf4729ca076ab433f5f8babea7fa64
+  Original project: MIT License, Copyright (c) 2026 Mahmud Farooque
+
+No original GTK source, installer scripts, or original artwork are bundled.
+
+KDE's dedicated fingerprint PAM service was checked against KScreenLocker:
+  https://invent.kde.org/plasma/kscreenlocker
+  greeter/pamauthenticators.cpp
+
+The runtime configuration is supplied by the installed distribution, not copied
+from a hardcoded PAM template in this project.

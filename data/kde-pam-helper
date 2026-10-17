@@ -1,0 +1,4 @@
+#!/usr/bin/python3 -I
+from fingerprint_manager.pam_services import main
+
+main()
