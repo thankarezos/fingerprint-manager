@@ -333,7 +333,7 @@ class Backend(QObject):
             if self.demo else kde_settings.inspect())
         if self.demo:
             self._auth_services = [dict(key=key, title=title, service=service, enabled=False,
-                supported=True, managed=False, status='disabled', detail='Demo configuration; no system files are accessed.',
+                supported=True, managed=False, origin='local', status='disabled', detail='Demo configuration; no system files are accessed.',
                 preview='Demo preview: fingerprint authentication would be added for ' + service,
                 digest='demo', sources=[], target='/etc/pam.d/' + service,
                 choices=['sddm', 'plasmalogin'] if key == 'login' else [])
@@ -382,38 +382,25 @@ class Backend(QObject):
 
     @Slot(str, str)
     def preparePam(self, key, action):
-        if self._busy or action not in ('enable', 'restore', 'adopt', 'disable', 'enable-managed'):
+        if self._busy or action not in ('inspect', 'restore', 'local-enable', 'local-disable', 'create-override'):
             return
         self.refreshPam()
         row = next((row for row in self._auth_services if row['key'] == key), None)
         if not row or row['service'] not in pam_services.ALLOWED:
             self._say('Choose a supported authentication service.', 'error')
             return
-        self._review = dict(row, action=action)
-        if action == 'enable' and not row.get('managed'):
-            self._review.update(supported=False, preview='External configuration is read-only. Select Fingerprint Manager as the owner to enable managed controls.\n\n' + row.get('preview', ''))
-        self.changed.emit()
-        if action == 'adopt':
-            if self.demo:
-                self._review.update(preview='Demo: adopt this service without changing authentication behavior.', supported=True, enabled=False)
-            else:
-                try:
-                    plan = pam_services.PamStore().adopt_plan(row['service'])
-                    self._review.update(preview=plan['preview'], digest=plan['digest'], supported=True, enabled=False)
-                except (OSError, ValueError) as exc:
-                    self._say(str(exc), 'error')
-                    return
-        if action in ('restore', 'disable', 'enable-managed'):
-            if self.demo:
-                self._review.update(preview='Demo managed-operation preview. No files will change.', supported=True, enabled=False)
-            elif helper_available():
-                self._run('pam-session', 'pkexec', [str(pam_services.HELPER), 'review-' + action, row['service']])
-                return
-            else:
-                self._say('Install the packaged administrator helper to review a private backup.', 'error')
-                return
-        # Publish the completed preview, including adoption/managed-operation
-        # updates, before QML opens the dialog.
+        self._review = dict(row, action=action, supported=False, enabled=False)
+        if action == 'inspect':
+            self._review['preview'] = ('Vendor configuration is read-only. Create a local override to change it.\n\n'
+                                       if row.get('origin') == 'vendor' else 'Local configuration. Changes require review and administrator authorization.\n\n') + row.get('preview', '')
+        elif self.demo:
+            self._review.update(preview='Demo local-configuration preview. No files will change.', supported=True)
+        elif helper_available():
+            self._run('pam-session', 'pkexec', [str(pam_services.HELPER), 'review-' + action, row['service']])
+            return
+        else:
+            self._say('Install or update the packaged administrator helper to review this change.', 'error')
+            return
         self.changed.emit()
         self.pamReviewReady.emit()
 

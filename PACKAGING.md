@@ -48,7 +48,7 @@ compatibility, but imports `fingerprint_manager.pam_services` and handles all
 supported locations. Its PolicyKit action is
 `io.github.thankarezos.fingerprint-manager.pam`.
 
-The helper accepts enable/adopt/managed-toggle/restore operations and their
+The helper accepts local-enable/local-disable/create-override/restore operations and their
 private-backup previews, plus an allowlisted service name. It accepts no filesystem path arguments. Privileged commands use
 fixed PAM directories and backup locations. Shared include files are read-only; generated app-owned copies are managed separately.
 
@@ -63,15 +63,20 @@ The helper is deliberately not installed by pip. Until a system package installs
 it, the GUI offers read-only authentication inspection and enable previews. Privileged PolicyKit
 integration has not been exercised on a live authentication configuration.
 
-Ownership is per service. Adoption stores the original without changing auth
-behavior. Releasing ownership restores it. Direct fingerprint alternatives can
+Vendor service files are read-only. Creating a local override and changing an
+existing local service require reviewed authorization; there is no ownership
+switch. Each edit keeps a private snapshot, and backup restoration is a separate
+recovery action. Legacy takeover backups remain compatible. Package removal
+leaves the selected authentication configuration in place.
+
+Direct fingerprint alternatives can
 be disabled in place. Inherited alternatives use generated service-specific
 include copies; the helper derives their names itself and accepts no arbitrary
 include paths. New generations are written before the top-level service switches.
 Edited app-owned copies block toggles and cleanup. Source-only execution still
 requires the installed helper before any management operation can be applied.
 
-Managed-operation previews use a single authorized helper process. The helper
+Local-operation previews use a single authorized helper process. The helper
 fixes the service and action before presenting its preview and accepts one
 bounded confirmation over stdin within two minutes. Cancellation, EOF, timeout,
 a mismatched digest, or subsequently changed configuration prevents mutation.

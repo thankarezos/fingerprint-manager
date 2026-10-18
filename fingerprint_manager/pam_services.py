@@ -161,6 +161,7 @@ class PamStore:
 
     def inspect(self, service):
         result = dict(service=service, enabled=False, supported=False, managed=False,
+                      origin='local' if os.path.lexists(self.etc / service) else 'vendor',
                       status='unknown', detail='', preview='', digest='', sources=[], target=str(self.etc / service))
         if service not in ALLOWED:
             result['detail'] = 'Choose a supported PAM service.'
@@ -281,10 +282,11 @@ class PamStore:
             atomic_write(self.etc / service, plan['proposed'], payload['mode'])
         return f'{service} is now managed by this app. Authentication behavior was preserved.'
 
-    def managed_plan(self, service, action):
+    def managed_plan(self, service, action, payload=None):
         if service not in ALLOWED or action not in ('disable', 'enable-managed'):
             raise ValueError('Unsupported managed operation.')
-        payload = json.loads(read_regular(self.state / f'{service}.json', self.privileged))
+        if payload is None:
+            payload = json.loads(read_regular(self.state / f'{service}.json', self.privileged))
         current = read_regular(self.etc / service, self.privileged)
         if hashlib.sha256(current).hexdigest() != payload['applied']:
             raise ValueError('This service was edited externally. Review it before changing it.')
@@ -327,6 +329,12 @@ class PamStore:
         for name in names.values():
             if len(name) > 200 or os.path.lexists(self.etc / name):
                 raise ValueError('A managed include name is already in use or too long.')
+        # Commenting removes a PAM entry; retain slots whenever a numeric jump
+        # could jump across a removed rule in the effective graph. Required native factors must still fail
+        # while disabled, rather than accidentally allowing an empty auth stack.
+        last_fingerprint = max((i for i, rule in enumerate(rules) if rule['module'] == 'pam_fprintd.so'), default=-1)
+        has_numeric_jumps = any(re.search(r'=\s*\d+(?=\s|\])', rule['control'])
+                                for rule in rules[:last_fingerprint])
         def rewrite(raw, disable):
             lines = raw.decode().splitlines(keepends=True)
             for index, line in enumerate(lines):
@@ -336,7 +344,10 @@ class PamStore:
                     if control in ('include', 'substack') and module in names:
                         lines[index] = line[:match.start(3)] + names[module] + line[match.end(3):]
                     elif disable and Path(module).name == 'pam_fprintd.so':
-                        lines[index] = f'{kind} {control} pam_deny.so # Fingerprint Manager: fingerprint disabled\n'
+                        if control == 'sufficient' and not has_numeric_jumps:
+                            lines[index] = '# Fingerprint Manager: disabled: ' + line
+                        else:
+                            lines[index] = f'{kind} {control} pam_deny.so # Fingerprint Manager: fingerprint disabled\n'
                 elif line.strip().startswith('@include '):
                     old = line.strip().split()[1]
                     if old in names:
@@ -364,15 +375,58 @@ class PamStore:
         return dict(service=service, digest=digest, preview=preview, proposed=proposed,
                     changes=changes, payload=payload, old_artifacts=old_artifacts)
 
-    def set_managed(self, service, action, expected):
+    def local_plan(self, service, action):
+        """Edit the effective local configuration, without an ownership step."""
+        if service not in ALLOWED or action not in ('local-enable', 'local-disable', 'create-override'):
+            raise ValueError('Unsupported local configuration operation.')
+        records, rules, errors, digest = self.graph(service)
+        if errors:
+            raise ValueError('; '.join(errors))
+        local = os.path.lexists(self.etc / service)
+        if (action == 'create-override') == local:
+            raise ValueError('Vendor files are read-only. Create a local override first; local files can be edited directly.')
+        source, current = records[service]
+        record = self.state / f'{service}.json'
+        previous = json.loads(read_regular(record, self.privileged)) if os.path.lexists(record) else None
+        matches = previous and hashlib.sha256(current).hexdigest() == previous['applied']
+        if previous and not matches and previous.get('artifacts'):
+            raise ValueError('The local configuration and its generated includes diverged. Review the changes manually.')
+        payload = previous if matches else dict(present=local,
+            original=base64.b64encode(current).decode(), applied=hashlib.sha256(current).hexdigest(),
+            mode=stat.S_IMODE(source.stat().st_mode))
+        enabled = any(rule['module'] == 'pam_fprintd.so' for rule in rules)
+        if action == 'local-disable' or (action == 'local-enable' and matches and 'enabled_root' in payload):
+            return self.managed_plan(service, 'disable' if action == 'local-disable' else 'enable-managed', payload)
+        if action == 'local-enable' and enabled:
+            raise ValueError('Fingerprint authentication is already enabled.')
+        proposed = current if enabled else self.proposed(service, records, rules).encode()
+        preview = ''.join(difflib.unified_diff(current.decode().splitlines(True), proposed.decode().splitlines(True),
+                         fromfile=str(source), tofile=str(self.etc / service)))
+        if not local:
+            preview = 'Create a local override. The vendor file remains unchanged.\n\n' + (preview or current.decode())
+        return dict(service=service, digest=digest, preview=preview, proposed=proposed,
+                    changes={}, old_artifacts={}, payload=payload)
+
+    def set_local(self, service, action, expected):
+        return self.set_managed(service, action, expected, local=True)
+
+    def set_managed(self, service, action, expected, local=False):
         with self.locked():
-            plan = self.managed_plan(service, action)
+            plan = self.local_plan(service, action) if local else self.managed_plan(service, action)
             if not expected or plan['digest'] != expected:
                 raise ValueError('Configuration changed since the managed preview.')
             payload = plan['payload']
             record = self.state / f'{service}.json'
-            original_record = read_regular(record, self.privileged)
-            current_root = read_regular(self.etc / service, self.privileged)
+            original_record = read_regular(record, self.privileged) if os.path.lexists(record) else None
+            target_present = os.path.lexists(self.etc / service)
+            current_root = read_regular(self.source(service), self.privileged)
+            if local:
+                history = self.state / 'history'
+                history.mkdir(mode=0o700, exist_ok=True)
+                # Keep a snapshot of each edit, even when a later local edit establishes a new baseline.
+                atomic_write(history / f'{service}-{time.time_ns()}.json', json.dumps(dict(
+                    present=target_present, original=base64.b64encode(current_root).decode(),
+                    previous_record=base64.b64encode(original_record).decode() if original_record else None)).encode(), 0o600)
             created = []
             try:
                 for name, raw in plan['changes'].items():
@@ -387,18 +441,24 @@ class PamStore:
                 atomic_write(self.etc / service, plan['proposed'], payload['mode'])
             except (OSError, ValueError):
                 # Ordinary write failures leave the original service and record usable.
-                root_now = read_regular(self.etc / service, self.privileged)
+                root_now = read_regular(self.source(service), self.privileged)
                 if root_now == plan['proposed']:
-                    atomic_write(self.etc / service, current_root, payload['mode'])
+                    if target_present:
+                        atomic_write(self.etc / service, current_root, payload['mode'])
+                    elif os.path.lexists(self.etc / service):
+                        (self.etc / service).unlink()
                 elif root_now != current_root:
                     raise ValueError('Configuration changed during recovery; manual review is required.')
-                atomic_write(record, original_record, 0o600)
+                if original_record is not None:
+                    atomic_write(record, original_record, 0o600)
+                elif os.path.lexists(record):
+                    record.unlink()
                 for name in created:
                     (self.etc / name).unlink()
                 raise
             for name in plan['old_artifacts']:
                 (self.etc / name).unlink()
-        return f'Fingerprint authentication {"disabled" if action == "disable" else "enabled"} for {service}.'
+        return f'Local fingerprint configuration updated for {service}. Backup saved.'
 
     def restore_plan(self, service):
         if service not in ALLOWED:
@@ -501,7 +561,9 @@ def interactive_review(store, service, action, input_stream=None, output_stream=
     input_stream = sys.stdin if input_stream is None else input_stream
     output_stream = sys.stdout if output_stream is None else output_stream
     with store.locked():
-        plan = store.restore_plan(service) if action == 'restore' else store.managed_plan(service, action)
+        plan = (store.restore_plan(service) if action == 'restore' else
+                store.local_plan(service, action) if action in ('local-enable', 'local-disable', 'create-override') else
+                store.managed_plan(service, action))
     public = {key: plan[key] for key in ('service', 'preview', 'digest')}
     encoded = PREVIEW_PREFIX + json.dumps(public)
     if len(encoded.encode()) > 512000:
@@ -516,12 +578,14 @@ def interactive_review(store, service, action, input_stream=None, output_stream=
         raise ValueError('The confirmation does not match the authorized preview.')
     if action == 'restore':
         return store.restore(service, plan['digest'])
+    if action in ('local-enable', 'local-disable', 'create-override'):
+        return store.set_local(service, action, plan['digest'])
     return store.set_managed(service, action, plan['digest'])
 
 
 def main():
     parser = argparse.ArgumentParser(description='Configure allowlisted fingerprint authentication services')
-    parser.add_argument('action', choices=['enable', 'preview-restore', 'restore', 'adopt', 'disable', 'enable-managed', 'preview-disable', 'preview-enable-managed', 'review-restore', 'review-disable', 'review-enable-managed'])
+    parser.add_argument('action', choices=['review-local-enable', 'review-local-disable', 'review-create-override', 'enable', 'preview-restore', 'restore', 'adopt', 'disable', 'enable-managed', 'preview-disable', 'preview-enable-managed', 'review-restore', 'review-disable', 'review-enable-managed'])
     parser.add_argument('service', choices=sorted(ALLOWED))
     parser.add_argument('--expected')
     args = parser.parse_args()

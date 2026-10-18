@@ -212,7 +212,7 @@ Kirigami.ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
                 Controls.Label {
-                    text: qsTr("Choose external or app-managed configuration separately for each location. Taking ownership saves the original first. Returning to external restores that original configuration.")
+                    text: qsTr("Vendor configurations are read-only. Create a local override or edit an existing local configuration after reviewing and authorizing the change. Settings remain in place when this app is uninstalled.")
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                 }
@@ -235,23 +235,22 @@ Kirigami.ApplicationWindow {
                                 }
                                 Kirigami.Heading { text: locationCard.modelData.title; level: 2; Layout.fillWidth: true }
                                 Controls.Label {
-                                    text: locationCard.modelData.status === "external" ? qsTr("PAM configured externally")
-                                         : locationCard.modelData.status === "managed" ? qsTr("Managed by this app")
-                                         : locationCard.modelData.status === "disabled" ? qsTr("Not configured") : qsTr("Needs review")
+                                    text: locationCard.modelData.status === "unknown" ? qsTr("Needs review")
+                                         : locationCard.modelData.origin === "vendor" ? qsTr("Vendor configuration (read-only)")
+                                         : qsTr("Local configuration")
                                     font.bold: true
                                 }
                             }
                             RowLayout {
                                 Controls.Button {
-                                    objectName: "owner-" + locationCard.modelData.key
-                                    text: locationCard.modelData.managed ? qsTr("Restore external configuration…") : qsTr("Take over configuration…")
-                                    icon.name: locationCard.modelData.managed ? "edit-undo" : "document-edit"
+                                    objectName: "backup-" + locationCard.modelData.key
+                                    text: locationCard.modelData.origin === "vendor" ? qsTr("Create local override…") : qsTr("Restore original backup…")
+                                    icon.name: locationCard.modelData.origin === "vendor" ? "document-edit" : "edit-undo"
                                     enabled: !backend.busy && locationCard.modelData.service.length > 0
-                                        && (!locationCard.modelData.managed || backend.helperReady || backend.demoMode)
-                                    onClicked: backend.preparePam(locationCard.modelData.key, locationCard.modelData.managed ? "restore" : "adopt")
+                                        && locationCard.modelData.status !== "unknown"
+                                    onClicked: backend.preparePam(locationCard.modelData.key, locationCard.modelData.origin === "vendor" ? "create-override" : "restore")
                                 }
                                 Controls.Label {
-                                    visible: locationCard.modelData.managed
                                     text: locationCard.modelData.enabled ? qsTr("Fingerprint enabled") : qsTr("Fingerprint disabled")
                                     font.bold: true
                                 }
@@ -302,13 +301,13 @@ Kirigami.ApplicationWindow {
                             RowLayout {
                                 Controls.Button {
                                     objectName: "review-" + locationCard.modelData.key
-                                    text: locationCard.modelData.managed
-                                        ? (locationCard.modelData.enabled ? qsTr("Disable fingerprint…") : qsTr("Enable fingerprint…"))
-                                        : qsTr("Review existing configuration")
+                                    text: locationCard.modelData.origin === "vendor" ? qsTr("Review vendor configuration")
+                                        : (locationCard.modelData.enabled ? qsTr("Disable fingerprint…") : qsTr("Enable fingerprint…"))
                                     icon.name: "document-preview"
-                                    enabled: !backend.busy && (locationCard.modelData.managed || locationCard.modelData.supported || locationCard.modelData.enabled)
-                                    onClicked: backend.preparePam(locationCard.modelData.key, locationCard.modelData.managed
-                                        ? (locationCard.modelData.enabled ? "disable" : "enable-managed") : "enable")
+                                    enabled: !backend.busy && locationCard.modelData.service.length > 0
+                                        && locationCard.modelData.status !== "unknown"
+                                    onClicked: backend.preparePam(locationCard.modelData.key, locationCard.modelData.origin === "vendor" ? "inspect"
+                                        : (locationCard.modelData.enabled ? "local-disable" : "local-enable"))
                                 }
                             }
                         }
@@ -406,8 +405,8 @@ Kirigami.ApplicationWindow {
         onClosed: backend.cancelPamReview()
         anchors.centerIn: parent
         width: Math.min(window.width - 48, 720)
-        title: backend.pamAction === "restore" ? qsTr("Return to external configuration: %1").arg(backend.pamTitle)
-             : backend.pamAction === "adopt" ? qsTr("Manage configuration: %1").arg(backend.pamTitle)
+        title: backend.pamAction === "restore" ? qsTr("Restore original backup: %1").arg(backend.pamTitle)
+             : backend.pamAction === "create-override" ? qsTr("Create local override: %1").arg(backend.pamTitle)
              : qsTr("Review: %1").arg(backend.pamTitle)
         modal: true
         standardButtons: Controls.Dialog.Close
@@ -444,9 +443,9 @@ Kirigami.ApplicationWindow {
             Controls.Button {
                 objectName: "applyPamButton"
                 text: !backend.pamRequiresAdmin ? (backend.pamAction === "disable" ? qsTr("Disable for my account") : qsTr("Enable for my account"))
-                      : backend.pamAction === "restore" ? (backend.pamWaitingConfirmation ? qsTr("Restore external configuration") : qsTr("Authorize and restore external configuration"))
-                      : backend.pamAction === "adopt" ? qsTr("Authorize management")
-                      : backend.pamAction === "disable" ? (backend.pamWaitingConfirmation ? qsTr("Disable fingerprint") : qsTr("Authorize and disable"))
+                      : backend.pamAction === "restore" ? qsTr("Restore original backup")
+                      : backend.pamAction === "create-override" ? qsTr("Apply reviewed change")
+                      : backend.pamAction === "local-disable" ? (backend.pamWaitingConfirmation ? qsTr("Disable fingerprint") : qsTr("Authorize and disable"))
                       : backend.pamWaitingConfirmation ? qsTr("Enable fingerprint") : qsTr("Authorize and enable")
                 icon.name: "dialog-password"
                 enabled: (!backend.busy || backend.pamWaitingConfirmation) && backend.pamCanApply && (backend.helperReady || !backend.pamRequiresAdmin)

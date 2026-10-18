@@ -47,16 +47,15 @@ for key in ('sudo', 'login', 'lock', 'polkit'):
     backend.configurePam()
     assert not backend.busy, 'Demo must not launch a privileged process'
     QMetaObject.invokeMethod(pam_dialog, 'reject')
-owner = find_visual(root.contentItem(), 'owner-sudo')
-assert 'Take over' in owner.property('text')
-assert QMetaObject.invokeMethod(owner, 'clicked')
+backup = find_visual(root.contentItem(), 'backup-sudo')
+assert 'Restore original backup' in backup.property('text')
+assert QMetaObject.invokeMethod(backup, 'clicked')
 assert pam_dialog.property('visible')
-assert backend.pamAction == 'adopt'
+assert backend.pamAction == 'restore'
 QTest.qWait(50)
-assert root.findChild(QObject, 'pamPreviewText').property('text') == backend.pamPreview, 'QML shows a stale adoption preview'
+assert root.findChild(QObject, 'pamPreviewText').property('text') == backend.pamPreview
 assert backend.pamCanApply
 QMetaObject.invokeMethod(pam_dialog, 'reject')
-assert not backend.authServices[0]['managed'], 'Cancelled ownership preview changed state'
 if is_kde():
     backend.prepareKdeSetting()
     assert pam_dialog.property('visible')

@@ -102,25 +102,39 @@ Missing files, include cycles and unsupported syntax are reported as unknown,
 not as proof fingerprint authentication is disabled. The app reports rule
 presence; it does not simulate every possible PAM control-flow outcome.
 
-Each service provides an ownership action:
+The interface distinguishes configuration locations, not ownership:
 
-- **Take over configuration** previews taking ownership and saves the original before
-  enabling managed controls. Taking ownership itself does not alter authentication.
-- **Restore external configuration** previews restoring the saved original
-  and removes the app's ownership. It restores the original enabled/disabled state,
-  rather than silently keeping the app's latest settings.
+- **Vendor configuration** (`/usr/lib/pam.d`): read-only. **Create local override**
+  previews a complete local copy with the supported fingerprint setting enabled.
+  The vendor file is never edited.
+- **Local configuration** (`/etc/pam.d`): **Enable fingerprint** and **Disable
+  fingerprint** operate directly after a preview and administrator authorization.
+  No takeover step is required, including for files written by another tool.
+- **Restore original backup** is a separate recovery action, not an ownership
+  switch or a synonym for disabling fingerprint. It requires an existing backup
+  and refuses to overwrite later edits. For a vendor-only original it removes
+  the unchanged local override and reveals the current vendor configuration.
 
-Managed services offer **Enable fingerprint** and **Disable fingerprint**. A
-later external edit blocks automatic changes and restoration until reviewed.
+Each edit stores a private snapshot under `/var/lib/fingerprint-manager/history`.
+If a previously edited local service changes, a supported new edit is based on
+its current contents and saves a new recovery baseline. Earlier snapshots remain
+in history. Diverged generated include graphs require manual review. Existing
+backups from the former takeover UI remain compatible.
+
+Uninstalling the application leaves the selected PAM configuration, KDE
+preferences, enrollment and backups in place. Restore a backup before uninstalling
+if you want to undo the PAM changes; the original may itself enable fingerprints.
 Disabling a required fingerprint factor in a mixed authentication stack or a
 service with no recognized password fallback is refused for manual review.
 
 For inherited fingerprint alternatives, the application creates service-specific
 copies of the include graph. It keeps include/substack boundaries and numeric
-jump positions intact, replacing supported fingerprint alternatives with a failing
-module while disabled. Only the chosen service references these copies; other
+jump positions intact. Simple sufficient fingerprint rules are commented out while
+disabled and restored verbatim when re-enabled. Where removing an entry could
+change numeric jump targets, or for required native fingerprint factors, a failing
+module preserves the rule position and failure behavior. Only the chosen service references these copies; other
 services and the shared originals remain unchanged. Each toggle stages a new
-include generation before switching the service. Returning to external restores
+include generation before switching the service. Restoring the original backup restores
 the original file and deletes only unchanged app-owned copies. These snapshots
 shadow updates to their original auth includes and need review after distribution
 PAM updates. Direct service rules do not require include copies.
@@ -141,7 +155,7 @@ updates and should be reviewed after distribution changes.
 Applying a change requires an exact preview and administrator authorization.
 The helper rejects changes when the service or any included input changed since
 review. Originals are saved privately in `/var/lib/fingerprint-manager`.
-Restoration and managed toggles authorize one helper session, display the exact
+Restoration and local edits authorize one helper session, display the exact
 diff, then wait for confirmation within that same session. Closing the preview
 cancels it, and an unanswered review expires after two minutes. No second
 authentication prompt is required for the confirmed operation. Later edits

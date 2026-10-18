@@ -60,12 +60,12 @@ class BackendTests(unittest.TestCase):
         wait_done(backend)
         self.assertNotIn('left-thumb', backend.enrolled)
 
-    def test_adoption_notifies_the_completed_preview(self):
+    def test_local_edit_notifies_the_completed_preview(self):
         backend = self.backend()
         observed = []
         backend.changed.connect(lambda: observed.append((backend.pamPreview, backend.pamCanApply)))
-        backend.preparePam('sudo', 'adopt')
-        self.assertIn('adopt this service', backend.pamPreview)
+        backend.preparePam('sudo', 'local-enable')
+        self.assertIn('local-configuration preview', backend.pamPreview)
         self.assertEqual(observed[-1], (backend.pamPreview, True))
 
     def test_kde_preference_can_enable_and_disable(self):
